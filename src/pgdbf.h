@@ -46,6 +46,9 @@
 #define NUMERICMEMOSTYLE 0
 #define PACKEDMEMOSTYLE 1
 
+#define MEMOTYPEPICTURE 0
+#define MEMOTYPETEXT 1
+
 /* Don't edit this! It's defined in the XBase specification. */
 #define XBASEFIELDNAMESIZE 11
 
@@ -244,6 +247,9 @@ static char* convertcharset(const char* inputstring, size_t* inputsize)
 #endif
 
 static void exitwitherror(const char *message, const int systemerror) {
+    /* Flush the standard output in case data is still buffered */
+    fflush(stdout);
+
     /* Print the given error message to stderr, then exit.  If systemerror
      * is true, then use perror to explain the value in errno. */
     if(systemerror) {
