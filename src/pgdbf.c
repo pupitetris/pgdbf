@@ -30,7 +30,7 @@
 #include <sys/types.h>
 
 #include "pgdbf.h"
-#define STANDARDOPTS "cCdDeEhm:i:nNpPqQrRtTuU"
+#define STANDARDOPTS "cCdDeEhm:i:nNpPqQrRtTuUw:"
 
 int main(int argc, char **argv) {
     /* Describing the DBF file */
@@ -65,6 +65,9 @@ int main(int argc, char **argv) {
     size_t       memoblocksize = 0;  /* The length of each memo block */
     size_t       memofilesize;
     size_t       memorecordoffset;
+
+    int32_t      memolength;
+    int32_t      memotype;
 
     /* Processing and misc */
     IGNFIELD     *ignorefields;
@@ -112,6 +115,8 @@ int main(int argc, char **argv) {
     int     optusetransaction = 1;
     int     optusetruncatetable = 0;
     int     opttrimpadding = 1;
+    int     optmemowarn = 0;
+    uint32_t optmemowarnexcess = 0;
 
     /* Describing the PostgreSQL table */
     char *tablename;
@@ -220,6 +225,10 @@ int main(int argc, char **argv) {
         case 'U':
             optusetruncatetable = 0;
             break;
+        case 'w':
+            optmemowarn = 1;
+            sscanf (optarg, "%u", &optmemowarnexcess);
+            break;
         case 'h':
         default:
             /* If we got here because someone requested '-h', exit
@@ -238,9 +247,9 @@ int main(int argc, char **argv) {
     if(optexitcode != -1) {
         printf(
 #if defined(HAVE_ICONV)
-               "Usage: %s [-cCdDeEhtTuU] [-s encoding] [-m memofilename] [-i fieldname1,fieldname2,fieldnameN] filename [indexcolumn ...]\n"
+               "Usage: %s [-cCdDeEhtTuU] [-w excesslength] [-s encoding] [-m memofilename] [-i fieldname1,fieldname2,fieldnameN] filename [indexcolumn ...]\n"
 #else
-               "Usage: %s [-cCdDeEhtTuU] [-m memofilename] [-i fieldname1,fieldname2,fieldnameN] filename [indexcolumn ...]\n"
+               "Usage: %s [-cCdDeEhtTuU] [-w excesslength] [-m memofilename] [-i fieldname1,fieldname2,fieldnameN] filename [indexcolumn ...]\n"
 #endif
                "Convert the named XBase file into PostgreSQL format\n"
                "\n"
@@ -268,6 +277,7 @@ int main(int argc, char **argv) {
                "  -T  do not use an enclosing transaction\n"
                "  -u  issue a 'TRUNCATE' command before inserting data\n"
                "  -U  do not issue a 'TRUNCATE' command before inserting data (default)\n"
+               "  -w  warn of corrupted MEMO fields, excesslenght 0 disables check for excess length\n"
                "\n"
 #if defined(HAVE_ICONV)
                "If you don't specify an encoding via '-s', the data will be printed as is.\n"
@@ -769,18 +779,53 @@ int main(int argc, char **argv) {
                             s++;
                         }
                     }
+
                     if(memoblocknumber) {
                         memorecordoffset = memoblocksize * memoblocknumber;
                         if(memorecordoffset >= memofilesize) {
-                            exitwitherror("A memo record past the end of the memofile was requested", 0);
+                          if(optmemowarn) {
+                              printf("CORRUPT:OFFSET::Memo record past end of memofile requested");
+                              fprintf(stderr, "CORRUPT:OFFSET::Memo record past end of memofile requested\n");
+                              break;
+                          }
+                          exitwitherror("A memo record past the end of the memofile was requested", 0);
                         }
+
                         memorecord = memomap + memorecordoffset;
                         if(memofileisdbase3) {
                             t = strchr(memorecord, 0x1A);
                             safeprintbuf(memorecord, t - memorecord, opttrimpadding);
                         } else {
-                            safeprintbuf(memorecord + 8, sbigint32_t(memorecord + 4), opttrimpadding);
+                            memotype = sbigint32_t(memorecord);
+                            if(optmemowarn && memotype != MEMOTYPETEXT && memotype != MEMOTYPEPICTURE) {
+                                printf("CORRUPT:TYPE:type 0x%08xd,offset %lu:Only types 0 (PICTURE) and 1 (TEXT) allowed", memotype, memorecordoffset);
+                                fprintf(stderr, "CORRUPT:TYPE:type 0x%08xd,offset %lu:Only types 0 (PICTURE) and 1 (TEXT) allowed\n", memotype, memorecordoffset);
+                                break;
+                            }
+                          exitwitherror("A memo record with an invalid type was specified", 0);
                         }
+                          
+                        memolength = sbigint32_t(memorecord + 4);
+                        if(optmemowarn && memolength == 0) {
+                             printf("CORRUPT:ZERO:offset %lu:Memo of length 0 specified", memorecordoffset);
+                             fprintf(stderr, "CORRUPT:ZERO:offset %lu:Memo of length 0 specified\n", memorecordoffset);
+                            break;
+                        }
+                        if(optmemowarn && optmemowarnexcess && memolength > optmemowarnexcess) {
+                             printf("CORRUPT:EXCESS:length %d,offset %lu:Memo of excess length specified", memolength, memorecordoffset);
+                             fprintf(stderr, "CORRUPT:EXCESS:length %d,offset %lu:Memo of excess length specified\n", memolength, memorecordoffset);
+                            break;
+                        }
+                        if(memorecordoffset + 8 + memolength > memofilesize) {
+                            if(optmemowarn) {
+                                 printf("CORRUPT:TOOLONG:length %d,offset %lu:Memo of length past the end of memofile specified", memolength, memorecordoffset);
+                                 fprintf(stderr, "CORRUPT:TOOLONG:length %d,offset %lu:Memo of length past the end of memofile  specified\n", memolength, memorecordoffset);
+                                break;
+                            }
+                            exitwitherror("A memo record with a length past the end of the memofile was specified", 0);
+                        }
+
+                        safeprintbuf(memorecord + 8, memolength, opttrimpadding);
                     }
                     break;
                 case 'F':
