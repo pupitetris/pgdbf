@@ -4,7 +4,7 @@ pgdbf \- convert XBase / FoxPro tables to PostgreSQL
 
 .SH SYNOPSIS
 .B pgdbf
-[\-cCdDeEhqQtTuU] [-m memofile] filename [indexcolumn ...]
+[\-cCdDeEhqQtTuU] [-w excesslength] [-m memofile] filename [indexcolumn ...]
 
 .SH DESCRIPTION
 PgDBF is a program for converting XBase databases - particularly FoxPro
@@ -156,6 +156,14 @@ statement to clear the contents of a table before copying data into it.
 Suppress the
 .B TRUNCATE TABLE
 statement. Default.
+.TP
+.B -w excesslength
+Warn of corrupted MEMO fields, by reporting errors on the output and through
+standard error. excesslenght specifies a MEMO length beyond which a MEMO record
+will be considered corrupt. A value of 0 (zero) will disable this heuristic,
+but the other warnings will still be issued (invalid start offset, invalid type,
+zero length and length beyond end of file). Conversion will not stop when warnings
+are issued.
 
 .SH "OPTION NOTES"
 The
